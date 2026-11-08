@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#f2f4f7">
+    <title>LoRa</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            font-family: Arial, Helvetica, sans-serif;
+            background: #f2f4f7;
+            color: #222;
+            text-align: center;
+        }
+        .container {
+            max-width: 700px;
+            margin: auto;
+            padding: 20px;
+        }
+        h1 {
+            margin: 5px 0 4px 0;
+            font-size: 30px;
+        }
+        .subtitulo {
+            color: #666;
+            margin-bottom: 22px;
+        }
+        .status {
+            display: inline-block;
+            padding: 6px 14px;
+            border-radius: 20px;
+            background: #ddd;
+            color: #555;
+            font-size: 14px;
+            margin-bottom: 22px;
+        }
+        .status.ok { background: #d9f7df; color: #18752b; }
+        .status.erro { background: #ffdede; color: #a40000; }
+        .status.aguardando { background: #fff1c7; color: #8a6500; }
+        .dados {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 18px;
+        }
+        .card {
+            background: white;
+            border-radius: 18px;
+            padding: 23px 12px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.10);
+            min-width: 0;
+        }
+        .icone { font-size: 38px; margin-bottom: 8px; }
+        .titulo { font-size: 17px; color: #666; margin-bottom: 10px; }
+        .valor {
+            font-size: 42px;
+            font-weight: bold;
+            overflow-wrap: anywhere;
+        }
+        .unidade { font-size: 20px; color: #666; }
+        .ultima {
+            margin-top: 23px;
+            color: #666;
+            font-size: 14px;
+        }
+        .tempo { margin-top: 8px; font-size: 13px; color: #888; }
+        .payload {
+            margin-top: 18px;
+            padding: 13px;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 3px 12px rgba(0,0,0,0.07);
+            color: #555;
+            overflow-wrap: anywhere;
+        }
+        .payload strong { color: #333; }
+        .erroMsg {
+            margin-top: 15px;
+            color: #a40000;
+            display: none;
+            font-size: 14px;
+        }
+        .rodape { margin-top: 18px; color: #999; font-size: 12px; }
+        @media (max-width: 500px) {
+            .container { padding: 12px; }
+            h1 { font-size: 26px; }
+            .dados { grid-template-columns: 1fr; gap: 13px; }
+            .valor { font-size: 40px; }
+            .card { padding: 20px 12px; }
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>Monitoramento LoRa</h1>
+    <div class="subtitulo">Gateway LoRa — atualização em tempo real</div>
+
+    <div id="status" class="status aguardando">● Conectando...</div>
+
+    <div class="dados">
+        <div class="card">
+            <div class="icone">📶</div>
+            <div class="titulo">RSSI</div>
+            <div>
+                <span id="rssi" class="valor">--</span>
+                <span class="unidade">dBm</span>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="icone">〰️</div>
+            <div class="titulo">SNR</div>
+            <div>
+                <span id="snr" class="valor">--</span>
+                <span class="unidade">dB</span>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="icone">🌡️</div>
+            <div class="titulo">Temperatura</div>
+            <div>
+                <span id="temperatura" class="valor">--</span>
+                <span class="unidade">°C</span>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="icone">💧</div>
+            <div class="titulo">Umidade</div>
+            <div>
+                <span id="umidade" class="valor">--</span>
+                <span class="unidade">%</span>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="icone">📦</div>
+            <div class="titulo">Pacote recebido</div>
+            <div>
+                <span id="pacote" class="valor">--</span>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="icone">📊</div>
+            <div class="titulo">Pacotes diferentes</div>
+            <div>
+                <span id="totalPacotes" class="valor">0</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="payload">
+        Payload recebido:
+        <strong id="payload">Aguardando dados...</strong>
+    </div>
+
+    <div class="ultima">
+        Última leitura:
+        <strong id="dataHora">--</strong>
+    </div>
+
+    <div class="tempo">
+        Tempo desde a última leitura:
+        <strong id="tempoSemLeitura">--</strong>
+    </div>
+
+    <div class="tempo">
+        Última consulta ao dweet:
+        <strong id="ultimaConsulta">--</strong>
+    </div>
+
+    <div id="erroMsg" class="erroMsg">
+        Não foi possível obter os dados do gateway LoRa.
+    </div>
+
+    <div class="rodape">Thing dweet.cc: lora</div>
+</div>
+
+<script>
+const URL_DWEET = "https://dweet.cc/get/latest/dweet/for/lora";
+const INTERVALO_CONSULTA = 3000;
+const TEMPO_OFFLINE = 15000;
+
+let ultimaLeitura = null;
+let ultimoCreated = null;
+let recebeuPrimeiraLeitura = false;
+let totalPacotes = 0;
+let consultaEmAndamento = false;
+
+function formatarData(dataString) {
+    try {
+        return new Date(dataString).toLocaleString("pt-BR", {
+            timeZone: "America/Sao_Paulo",
+            day: "2-digit",
+            month: "2-digit",
+            year: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit"
+        });
+    } catch (erro) {
+        return dataString;
+    }
+}
+
+function extrairMedidas(payload) {
+    const texto = String(payload ?? "");
+    const temperatura = texto.match(/(?:^|[|;, ])T\s*:\s*(-?\d+(?:[.,]\d+)?)/i);
+    const umidade = texto.match(/(?:^|[|;, ])U\s*:\s*(-?\d+(?:[.,]\d+)?)/i);
+
+    return {
+        temperatura: temperatura ? temperatura[1].replace(",", ".") : null,
+        umidade: umidade ? umidade[1].replace(",", ".") : null
+    };
+}
+
+async function atualizarDados() {
+    if (consultaEmAndamento) return;
+    consultaEmAndamento = true;
+
+    const status = document.getElementById("status");
+    const erroMsg = document.getElementById("erroMsg");
+
+    document.getElementById("ultimaConsulta").textContent =
+        new Date().toLocaleTimeString("pt-BR");
+
+    try {
+        const resposta = await fetch(URL_DWEET, {
+            cache: "no-store"
+        });
+
+        if (!resposta.ok) {
+            throw new Error("HTTP " + resposta.status);
+        }
+
+        const dados = await resposta.json();
+
+        if (!dados.with || !dados.with.length || !dados.with[0].content) {
+            throw new Error("Dados inválidos recebidos do Dweet");
+        }
+
+        const dweet = dados.with[0];
+        const conteudo = dweet.content || {};
+        const createdAtual = dweet.created;
+
+        // A página só contabiliza uma nova leitura quando o Dweet muda.
+        if (createdAtual && createdAtual !== ultimoCreated) {
+            ultimoCreated = createdAtual;
+            ultimaLeitura = Date.now();
+            recebeuPrimeiraLeitura = true;
+            totalPacotes++;
+
+            const medidas = extrairMedidas(conteudo.payload);
+
+            document.getElementById("rssi").textContent =
+                conteudo.rssi !== undefined ? Number(conteudo.rssi).toFixed(0) : "--";
+
+            document.getElementById("snr").textContent =
+                conteudo.snr !== undefined ? Number(conteudo.snr).toFixed(1) : "--";
+
+            document.getElementById("pacote").textContent =
+                conteudo.pacote !== undefined ? conteudo.pacote : "--";
+
+            document.getElementById("temperatura").textContent =
+                medidas.temperatura !== null ? Number(medidas.temperatura).toFixed(2) : "--";
+
+            document.getElementById("umidade").textContent =
+                medidas.umidade !== null ? Number(medidas.umidade).toFixed(2) : "--";
+
+            document.getElementById("payload").textContent =
+                conteudo.payload !== undefined ? conteudo.payload : "--";
+
+            document.getElementById("dataHora").textContent =
+                formatarData(createdAtual);
+
+            document.getElementById("totalPacotes").textContent = totalPacotes;
+        }
+
+        status.textContent = "● Online";
+        status.className = "status ok";
+        erroMsg.style.display = "none";
+        verificarEstado();
+
+    } catch (erro) {
+        console.error("Erro ao consultar Dweet:", erro);
+        status.textContent = "● Erro de comunicação";
+        status.className = "status erro";
+        erroMsg.style.display = "block";
+        // Uma falha momentânea na consulta não apaga a última leitura.
+        verificarEstado();
+    } finally {
+        consultaEmAndamento = false;
+    }
+}
+
+function verificarEstado() {
+    const status = document.getElementById("status");
+
+    if (!recebeuPrimeiraLeitura) {
+        if (status.textContent !== "● Erro de comunicação") {
+            status.textContent = "● Aguardando";
+            status.className = "status aguardando";
+        }
+        return;
+    }
+
+    const decorrido = Date.now() - ultimaLeitura;
+    const segundos = Math.floor(decorrido / 1000);
+
+    document.getElementById("tempoSemLeitura").textContent = segundos + " s";
+
+    if (decorrido >= TEMPO_OFFLINE) {
+        status.textContent = "● Sem nova leitura";
+        status.className = "status erro";
+    } else {
+        status.textContent = "● Online";
+        status.className = "status ok";
+    }
+}
+
+// Primeira consulta e atualização periódica.
+atualizarDados();
+setInterval(atualizarDados, INTERVALO_CONSULTA);
+setInterval(verificarEstado, 1000);
+</script>
+</body>
+</html>
